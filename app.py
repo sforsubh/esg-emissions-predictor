@@ -1,3 +1,4 @@
+# Force Streamlit Cloud rebuild
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -112,3 +113,4 @@ if ENABLE_BATCH:
                 file_name="esg_emissions_predictions.csv",
                 mime="text/csv",
             )
+
