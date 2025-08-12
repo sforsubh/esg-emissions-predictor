@@ -24,22 +24,29 @@ st.markdown(
 
 APP_DIR = Path(__file__).parent
 
-# ---- ensure joblib is available (lazy import + fallback) ----
 def ensure_joblib():
+    st.write("🔧 Checking joblib...")
     try:
-        import joblib  # noqa: F401
+        import joblib  # noqa
+        st.write("✅ joblib already present")
     except Exception:
-        # If Streamlit Cloud reused a 3.13 cache without joblib, install it now.
+        st.write("⬇️ Installing joblib (first run can take ~1–2 min)...")
+        import sys, subprocess
         subprocess.check_call([sys.executable, "-m", "pip", "install", "joblib==1.4.2"])
     import joblib
+    st.write(f"✅ joblib ready: {joblib.__version__}")
     return joblib
 
-# ---------- Load bundled ensemble ----------
 @st.cache_resource
 def load_bundle():
     joblib = ensure_joblib()
-    bundle_path = APP_DIR / "models" / "ensemble_model.pkl"
+    from pathlib import Path
+    import time
+    t0 = time.time()
+    st.write("📦 Loading model bundle...")
+    bundle_path = Path(__file__).parent / "models" / "ensemble_model.pkl"
     bundle = joblib.load(bundle_path)
+    st.write(f"✅ Model loaded in {time.time()-t0:.1f}s")
     rf_ttr  = bundle["rf_model"]
     xgb_ttr = bundle["xgb_model"]
     weights = bundle.get("weights", {"w_rf": 0.3, "w_xgb": 0.7})
@@ -125,3 +132,4 @@ if ENABLE_BATCH:
                 file_name="esg_emissions_predictions.csv",
                 mime="text/csv",
             )
+
