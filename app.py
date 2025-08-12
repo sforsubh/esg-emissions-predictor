@@ -25,30 +25,23 @@ st.markdown(
 )
 
 APP_DIR = Path(__file__).parent
-DEBUG = False  # flip to True only when you want on-page debug messages
-
+DEBUG = False   # set True if you want to see on-page debug messages
 
 # ---------------- Utilities ----------------
 def ensure_joblib():
-    """
-    Ensure joblib is importable. If Streamlit Cloud reused a cache without joblib,
-    install it at runtime, then import.
-    """
+    """Ensure joblib is importable. If the build cache missed it, install at runtime."""
     try:
         import joblib  # noqa: F401
         if DEBUG:
             import joblib as _jb
             st.write(f"✅ joblib present: v{_jb.__version__}")
     except Exception:
-        if DEBUG:
-            st.write("⬇️ Installing joblib…")
+        if DEBUG: st.write("⬇️ Installing joblib…")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "joblib==1.4.2"])
     import joblib
     return joblib
 
-
 def resolve_model_path() -> Path:
-    """Try common locations for the bundle; error out nicely if not found."""
     candidates = [
         APP_DIR / "models" / "ensemble_model.pkl",
         APP_DIR / "ensemble_model.pkl",
@@ -56,58 +49,35 @@ def resolve_model_path() -> Path:
     for p in candidates:
         if p.exists():
             return p
-    st.error(
-        "❌ Model file not found. "
-        "Tried: " + ", ".join(str(p) for p in candidates)
-    )
+    st.error("❌ Model file not found. Tried: " + ", ".join(str(p) for p in candidates))
     st.stop()
 
-
-# ---------------- Load model bundle (cached) ----------------
 @st.cache_resource(show_spinner=False)
-def load_bundle():
+def load_bundle_cached():
+    """Heavy load (cached across reruns)."""
     joblib = ensure_joblib()
     bundle_path = resolve_model_path()
-
-    if DEBUG:
-        st.write("📦 Loading model bundle…")
+    if DEBUG: st.write("📦 Loading model bundle…")
     t0 = time.time()
     bundle = joblib.load(bundle_path)
-    if DEBUG:
-        st.write(f"✅ Model loaded in {time.time() - t0:.1f}s from {bundle_path.name}")
-
-    # Expect a dict with keys: rf_model, xgb_model, (optional) weights
+    if DEBUG: st.write(f"✅ Model loaded in {time.time() - t0:.1f}s")
     rf_ttr  = bundle["rf_model"]
     xgb_ttr = bundle["xgb_model"]
     weights = bundle.get("weights", {"w_rf": 0.3, "w_xgb": 0.7})
     return rf_ttr, xgb_ttr, weights
 
-
-rf_ttr, xgb_ttr, weights = load_bundle()
-w_rf, w_xgb = weights["w_rf"], weights["w_xgb"]
-
-st.title("🌏 ESG Emissions Predictor")
-
-
-# ---------- Infer categorical options from the trained OneHotEncoder ----------
 def get_categories_from_pipeline(ttr_model):
-    """
-    Works for TransformedTargetRegressor (has .regressor_) or a plain Pipeline.
-    Assumes your preprocessing step is named 'pre' with 'cat' (OHE) and 'num' blocks.
-    """
-    pipe = getattr(ttr_model, "regressor_", ttr_model)  # TTR.regressor_ or Pipeline itself
+    """Works for TransformedTargetRegressor (has .regressor_) or a plain Pipeline."""
+    pipe = getattr(ttr_model, "regressor_", ttr_model)
     if "pre" not in pipe.named_steps:
         st.error(f"Preprocessor step 'pre' not found. Steps: {list(pipe.named_steps.keys())}")
         st.stop()
-
     pre = pipe.named_steps["pre"]
     cats, num_cols = {}, []
     for name, transformer, cols in pre.transformers_:
         if name == "cat":
             ohe = transformer
-            # if the transformer is a Pipeline, try to use its last step
-            if hasattr(ohe, "named_steps"):
-                # best effort: grab last step that has categories_
+            if hasattr(ohe, "named_steps"):  # if it's a small pipeline, grab last step with categories_
                 for step in reversed(list(ohe.named_steps.values())):
                     if hasattr(step, "categories_"):
                         ohe = step
@@ -118,15 +88,30 @@ def get_categories_from_pipeline(ttr_model):
             num_cols.extend(cols)
     return cats, num_cols
 
+# ---------------- UI ----------------
+st.title("🌏 ESG Emissions Predictor")
 
+# Keep bundle in session so page renders instantly, then we load on click
+if "bundle" not in st.session_state:
+    st.info("Click **Initialize model** to load the predictors (first time can take ~1–2 min).")
+    if st.button("Initialize model", type="primary"):
+        with st.spinner("Loading model…"):
+            st.session_state.bundle = load_bundle_cached()
+        st.success("Model initialized. You can start predicting now!")
+        st.rerun()
+    st.stop()
+
+# If we reach here, the model is initialized
+rf_ttr, xgb_ttr, weights = st.session_state.bundle
+w_rf, w_xgb = weights["w_rf"], weights["w_xgb"]
+
+# Build form options from the preprocessor
 cat_options, num_cols = get_categories_from_pipeline(rf_ttr)
 
 st.subheader("Set input parameters")
-
 with st.form("single_form"):
     production_value = st.number_input(
-        "Production value", min_value=0.0, value=100.0,
-        help="Same units as used during training."
+        "Production value", min_value=0.0, value=100.0, help="Same units as used during training."
     )
     commodity = st.selectbox("Commodity", options=cat_options.get("commodity", ["Other"]))
     parent_type = st.selectbox("Parent type", options=cat_options.get("parent_type", ["Other"]))
@@ -142,7 +127,6 @@ if submitted:
     }])
     pred = w_rf * rf_ttr.predict(X_single) + w_xgb * xgb_ttr.predict(X_single)
     st.success(f"Estimated total emissions: **{pred[0]:,.2f} MtCO₂e**")
-
 
 # --------- Batch scoring (disabled) ---------
 ENABLE_BATCH = False
