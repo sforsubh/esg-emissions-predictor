@@ -1,12 +1,11 @@
 # Trigger rebuild after Python version change
 
+import sys, subprocess
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
 from pathlib import Path
 
-# Page settings: collapse & hide sidebar completely
 st.set_page_config(
     page_title="ESG Emissions Predictor",
     page_icon="🌍",
@@ -16,7 +15,6 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      /* hide sidebar + its toggle */
       [data-testid="stSidebar"] { display: none !important; }
       [data-testid="collapsedControl"] { display: none !important; }
     </style>
@@ -26,9 +24,20 @@ st.markdown(
 
 APP_DIR = Path(__file__).parent
 
+# ---- ensure joblib is available (lazy import + fallback) ----
+def ensure_joblib():
+    try:
+        import joblib  # noqa: F401
+    except Exception:
+        # If Streamlit Cloud reused a 3.13 cache without joblib, install it now.
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "joblib==1.4.2"])
+    import joblib
+    return joblib
+
 # ---------- Load bundled ensemble ----------
 @st.cache_resource
 def load_bundle():
+    joblib = ensure_joblib()
     bundle_path = APP_DIR / "models" / "ensemble_model.pkl"
     bundle = joblib.load(bundle_path)
     rf_ttr  = bundle["rf_model"]
@@ -39,11 +48,13 @@ def load_bundle():
 rf_ttr, xgb_ttr, weights = load_bundle()
 w_rf, w_xgb = weights["w_rf"], weights["w_xgb"]
 
-st.title("🌏 ESG Emissions Predictor")  # (removed the extra caption line)
+st.title("🌏 ESG Emissions Predictor")
 
 # ---------- Infer categorical options from the trained OneHotEncoder ----------
 def get_categories_from_pipeline(ttr_model):
-    pre = ttr_model.regressor_.named_steps["pre"]
+    # Works for TransformedTargetRegressor (has .regressor_) or straight Pipeline
+    pipe = getattr(ttr_model, "regressor_", ttr_model)
+    pre = pipe.named_steps["pre"]
     cats = {}
     num_cols = []
     for name, transformer, cols in pre.transformers_:
@@ -78,7 +89,7 @@ if submitted:
     pred = w_rf * rf_ttr.predict(X_single) + w_xgb * xgb_ttr.predict(X_single)
     st.success(f"Estimated total emissions: **{pred[0]:,.2f} MtCO₂e**")
 
-# --------- Batch scoring is disabled (remove whole block). To re-enable later, set ENABLE_BATCH=True.
+# --------- Batch scoring (disabled) ---------
 ENABLE_BATCH = False
 if ENABLE_BATCH:
     st.markdown("---")
@@ -114,5 +125,3 @@ if ENABLE_BATCH:
                 file_name="esg_emissions_predictions.csv",
                 mime="text/csv",
             )
-
-
