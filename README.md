@@ -45,5 +45,3 @@ Users can input commodity, production details, and ownership type to instantly e
 ## Note
 
 This is a **student-led, educational project** under fair use and is **not intended for commercial use**.
-
-Do you want me to add that next?
