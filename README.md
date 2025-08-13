@@ -36,7 +36,7 @@ The dataset contains high-granularity emissions and operational metrics, includi
 The trained ensemble model is deployed via a **Streamlit web application** for interactive emissions prediction.
 
 🔗 Try it out:
-*(Add your deployment link here)*
+*[(Add your deployment link here)](https://esg-emissions-predictor.streamlit.app/)*
 
 Users can input commodity, production details, and ownership type to instantly estimate corporate GHG emissions.
 
